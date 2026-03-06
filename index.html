@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>ППУ Система</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #fff; }
+
+        /* Кнопки управления */
+        .custom-controls {
+            position: absolute; top: 10px; left: 10px; z-index: 1000;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .btn-map {
+            width: 36px; height: 36px; background: #fff; border: 1px solid #333;
+            border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+            font-family: sans-serif; font-weight: bold; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .btn-map img { width: 22px; height: 22px; }
+
+        /* Таблица ППУ */
+        .ppu-table {
+            background: rgba(30, 30, 30, 0.9); color: white;
+            padding: 4px 10px; border-radius: 3px; font-family: sans-serif;
+            font-size: 11px; margin: 10px; border-left: 3px solid #ff4d4d;
+        }
+        .ppu-table b { color: #ff4d4d; margin-left: 4px; font-size: 13px; }
+
+        /* Попап меню */
+        .obj-menu { padding: 4px; display: flex; flex-direction: column; gap: 4px; }
+        .btn-opt {
+            padding: 5px 10px; border: 1px solid #ccc; background: #fff;
+            cursor: pointer; font-size: 11px; border-radius: 2px; font-weight: bold;
+        }
+        .btn-opt.del { background: #ff4d4d; color: #fff; border: none; }
+
+        .shahed-icon { transition: transform 0.2s ease-out; }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="custom-controls">
+    <button class="btn-map" id="btnA" onclick="toggleShahed()">A</button>
+    <button class="btn-map" id="btnShahed" onclick="activateShahed()">
+        <img src="https://image2url.com/r2/default/images/1772749076608-f200b281-0be8-4a2f-9558-48ba7a4f36ea.png">
+    </button>
+    <button class="btn-map" onclick="clearAll()" title="Очистити все">🗑️</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // 1. Инициализация карты
+    const map = L.map('map', { zoomControl: false }).setView([48.3, 31.1], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // 2. Компактная таблица
+    const info = L.control({position: 'bottomright'});
+    info.onAdd = function() {
+        const div = L.DomUtil.create('div', 'ppu-table');
+        div.innerHTML = `ППУ: <b id="count">0</b>`;
+        return div;
+    };
+    info.addTo(map);
+
+    let shahedMode = false;
+    let rotateMode = false;
+    let currentObj = null;
+    let allMarkers = L.layerGroup().addTo(map);
+
+    function toggleShahed() {
+        const b = document.getElementById('btnShahed');
+        b.style.display = (b.style.display === 'none') ? 'flex' : 'none';
+    }
+
+    function activateShahed() {
+        shahedMode = true; 
+        rotateMode = false;
+        currentObj = null;
+    }
+
+    function updateCount() {
+        document.getElementById('count').innerText = allMarkers.getLayers().length;
+    }
+
+    function clearAll() {
+        if(confirm("Очистити всі об'єкти?")) { allMarkers.clearLayers(); updateCount(); }
+    }
+
+    function getAngle(p1, p2) {
+        return Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180 / Math.PI + 90;
+    }
+
+    // Обработка кликов
+    map.on('click', function(e) {
+        if (shahedMode) {
+            if (!currentObj) {
+                // Первый клик - установка
+                const icon = L.divIcon({
+                    className: 's-div',
+                    html: `<img src="https://image2url.com/r2/default/images/1772749076608-f200b281-0be8-4a2f-9558-48ba7a4f36ea.png" class="shahed-icon" style="width:26px;height:26px;">`,
+                    iconSize: [26, 26], iconAnchor: [13, 13]
+                });
+                currentObj = L.marker(e.latlng, { icon: icon }).addTo(allMarkers);
+                
+                currentObj.on('click', function(ev) {
+                    L.DomEvent.stopPropagation(ev);
+                    const id = L.stamp(this);
+                    this.bindPopup(`
+                        <div class="obj-menu">
+                            <button class="btn-opt" onclick="startRotate('${id}')">Курс</button>
+                            <button class="btn-opt del" onclick="deleteObj('${id}')">Видалити</button>
+                        </div>
+                    `).openPopup();
+                });
+                updateCount();
+            } else {
+                // Второй клик - направление (при спавне)
+                const p1 = map.latLngToContainerPoint(currentObj.getLatLng());
+                const p2 = map.latLngToContainerPoint(e.latlng);
+                currentObj.getElement().querySelector('img').style.transform = `rotate(${getAngle(p1, p2)}deg)`;
+                currentObj = null;
+                shahedMode = false;
+            }
+        } 
+        else if (rotateMode && currentObj) {
+            // Смена курса через кнопку в меню
+            const p1 = map.latLngToContainerPoint(currentObj.getLatLng());
+            const p2 = map.latLngToContainerPoint(e.latlng);
+            currentObj.getElement().querySelector('img').style.transform = `rotate(${getAngle(p1, p2)}deg)`;
+            rotateMode = false;
+            currentObj = null;
+        }
+    });
+
+    // Глобальные функции для меню
+    window.deleteObj = function(id) {
+        allMarkers.eachLayer(l => { if (L.stamp(l) == id) allMarkers.removeLayer(l); });
+        updateCount();
+    };
+
+    window.startRotate = function(id) {
+        allMarkers.eachLayer(l => { 
+            if (L.stamp(l) == id) { currentObj = l; rotateMode = true; shahedMode = false; l.closePopup(); } 
+        });
+    };
+
+    // 3. Загрузка DeepState БЕЗ обводки
+    fetch('deepstate.geojson').then(r => r.json()).then(data => {
+        L.geoJSON(data, { 
+            style: { 
+                stroke: false,      // Убирает линии границ
+                fillColor: "#ff0000", 
+                fillOpacity: 0.15 
+            }, 
+            interactive: false 
+        }).addTo(map);
+    }).catch(() => console.log("DeepState файл не знайдено"));
+
+</script>
+</body>
+</html>
+
